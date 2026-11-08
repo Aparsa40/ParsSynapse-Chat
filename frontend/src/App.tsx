@@ -94,7 +94,8 @@ export default function App() {
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [selectedModel, setSelectedModel] = useState("ParsSynapse Auto");
   const [isThinking, setIsThinking] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);\n  const [modelManagerOpen, setModelManagerOpen] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [modelManagerOpen, setModelManagerOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
