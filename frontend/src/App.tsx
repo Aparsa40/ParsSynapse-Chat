@@ -14,7 +14,6 @@ import {
   Settings2,
   Sparkles,
   SquarePen,
-  X,
 } from "lucide-react";
 
 type Message = {
