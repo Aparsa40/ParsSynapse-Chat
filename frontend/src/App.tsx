@@ -93,7 +93,7 @@ export default function App() {
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [selectedModel, setSelectedModel] = useState("ParsSynapse Auto");
   const [isThinking, setIsThinking] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);\n  const [modelManagerOpen, setModelManagerOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -242,13 +242,13 @@ export default function App() {
         </div>
       </aside>
 
-      <main className="main-panel">
+      {modelManagerOpen && <ModelManager onClose={() => setModelManagerOpen(false)} />}\n\n      <main className="main-panel">
         <header className="topbar">
           <div className="topbar-start">
             <button className="icon-button mobile-menu" aria-label="باز کردن منو" onClick={() => setSidebarOpen(true)}>
               <Menu size={19} />
             </button>
-            <div className="model-picker-wrap">
+            <button className="icon-button model-settings-button" title="مدیریت اتصال‌ها" aria-label="مدیریت اتصال‌ها" onClick={() => setModelManagerOpen(true)}><Settings2 size={17} /></button>\n            <div className="model-picker-wrap">
               <button className="model-picker" onClick={() => setModelMenuOpen((open) => !open)}>
                 <span>{selectedModel}</span>
                 <ChevronDown size={15} />
