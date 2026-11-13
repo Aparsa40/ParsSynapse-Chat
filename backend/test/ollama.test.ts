@@ -78,7 +78,7 @@ test("Ollama adapter serializes concurrent chat requests until unload is confirm
           controller.enqueue(new TextEncoder().encode(JSON.stringify({
             message: { role: "assistant", content: "ok" },
             done: true,
-          }) + "\\n"));
+          }) + "\n"));
           controller.close();
           activeChats -= 1;
         },
