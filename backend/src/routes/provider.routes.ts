@@ -61,8 +61,16 @@ export async function registerProviderRoutes(app: FastifyInstance, config: AppCo
     });
 
     try {
+      const provider = router.getProvider(parsed.data.provider);
+      const availableModels = await registry.discoverModels(provider.id, controller.signal);
+      if (!availableModels.some((model) => model.id === parsed.data.model)) {
+        return reply.code(404).send({
+          error: { code: "MODEL_NOT_FOUND", message: "مدل انتخاب‌شده در Ollama نصب نیست یا در دسترس قرار ندارد." },
+        });
+      }
+
       const stream = router.streamChat({
-        providerId: parsed.data.provider,
+        providerId: provider.id,
         model: parsed.data.model,
         messages: parsed.data.messages,
         signal: controller.signal,
@@ -85,6 +93,11 @@ export async function registerProviderRoutes(app: FastifyInstance, config: AppCo
     } catch (error) {
       if (controller.signal.aborted) return;
       if (!reply.raw.headersSent) {
+        if (error instanceof Error && error.message.startsWith("Unsupported provider:")) {
+          return reply.code(400).send({
+            error: { code: "UNSUPPORTED_PROVIDER", message: "ارائه‌دهنده انتخاب‌شده پشتیبانی نمی‌شود." },
+          });
+        }
         const providerError = error instanceof ProviderRequestError ? error : undefined;
         return reply.code(providerError?.code === "PROVIDER_TIMEOUT" ? 504 : 503).send({
           error: {
