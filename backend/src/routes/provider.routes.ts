@@ -52,7 +52,7 @@ export async function registerProviderRoutes(app: FastifyInstance, config: AppCo
     const models = results.flatMap((result) => result.status === "fulfilled" ? result.value.result : []);
     const failures = results.filter((result) => result.status === "rejected");
     if (models.length === 0 && failures.length === results.length && results.length > 0) {
-      const error = failures[0].reason;
+      const error = failures[0]?.reason;
       const code = error instanceof ProviderRequestError ? error.code : "PROVIDER_UNAVAILABLE";
       return reply.code(code === "PROVIDER_TIMEOUT" ? 504 : 503).send({
         error: { code, message: "مدل‌های Providerهای متصل در دسترس نیستند. وضعیت اتصال‌ها را بررسی کنید." },
