@@ -82,6 +82,32 @@ test("chat endpoint validates input and streams Ollama output as SSE", async () 
     assert.equal(invalid.statusCode, 400);
     assert.equal(invalid.json().error.code, "VALIDATION_ERROR");
 
+    const unsupported = await app.inject({
+      method: "POST",
+      url: "/api/v1/chat/completions",
+      headers: { host: "127.0.0.1:4000" },
+      payload: {
+        provider: "not-installed",
+        model: "test-model:latest",
+        messages: [{ role: "user", content: "hello" }],
+      },
+    });
+    assert.equal(unsupported.statusCode, 400);
+    assert.equal(unsupported.json().error.code, "UNSUPPORTED_PROVIDER");
+
+    const missingModel = await app.inject({
+      method: "POST",
+      url: "/api/v1/chat/completions",
+      headers: { host: "127.0.0.1:4000" },
+      payload: {
+        provider: "ollama",
+        model: "missing-model",
+        messages: [{ role: "user", content: "hello" }],
+      },
+    });
+    assert.equal(missingModel.statusCode, 404);
+    assert.equal(missingModel.json().error.code, "MODEL_NOT_FOUND");
+
     await app.listen({ host: "127.0.0.1", port: 0 });
     const address = app.server.address() as AddressInfo;
     const response = await fetch(`http://127.0.0.1:${address.port}/api/v1/chat/completions`, {
