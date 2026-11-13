@@ -20,7 +20,7 @@ const environmentSchema = z.object({
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
   REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
   OLLAMA_BASE_URL: localOllamaUrl.default("http://127.0.0.1:11434"),
-  OLLAMA_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(120_000),
+  OLLAMA_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(600_000),
 });
 
 export type AppConfig = z.infer<typeof environmentSchema>;
