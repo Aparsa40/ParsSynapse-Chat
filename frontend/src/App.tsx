@@ -74,20 +74,6 @@ function makeId() {
   return globalThis.crypto?.randomUUID?.() ?? `msg-${Date.now()}-${Math.random()}`;
 }
 
-function createDemoReply(prompt: string) {
-  const normalized = prompt.toLowerCase();
-
-  if (normalized.includes("سلام") || normalized.includes("hello")) {
-    return "سلام! خوشحالم که اینجایی. چطور می‌تونم کمکت کنم؟";
-  }
-
-  if (normalized.includes("react") || normalized.includes("ری‌اکت")) {
-    return "برای ساخت رابط‌های تعاملی، React به ما کمک می‌کند UI را به کامپوننت‌های مستقل تقسیم کنیم. در ParsSynapse هم همین رویکرد را دنبال می‌کنیم تا بخش‌هایی مثل Sidebar، MessageList و Composer مستقل و قابل توسعه باشند.\n\nتوجه: این پاسخ فعلاً نمونه نمایشی است و هنوز از مدل زبانی دریافت نمی‌شود.";
-  }
-
-  return "پیامت دریافت شد! رابط کاربری ParsSynapse Chat در حال حاضر به‌صورت نمایشی کار می‌کند. پس از پیاده‌سازی Backend، این قسمت پاسخ واقعی را از مدل انتخاب‌شده دریافت خواهد کرد.\n\nدر گام بعدی می‌توانیم تاریخچه مکالمات، انتخاب Provider و اتصال API را اضافه کنیم.";
-}
-
 export default function App() {
   const [conversations, setConversations] = useState<Conversation[]>(starterConversations);
   const [activeId, setActiveId] = useState("welcome");
@@ -338,7 +324,7 @@ export default function App() {
             <button className="icon-button model-settings-button" title="مدیریت اتصال‌ها" aria-label="مدیریت اتصال‌ها" onClick={() => setModelManagerOpen(true)}><Settings2 size={17} /></button>
             <div className="model-picker-wrap">
               <button className="model-picker" onClick={() => setModelMenuOpen((open) => !open)}>
-                <span>{selectedModel}</span>
+                <span>{selectedModel?.name ?? "مدل گفتگو موجود نیست"}</span>
                 <ChevronDown size={15} />
               </button>
               {modelMenuOpen && (
