@@ -63,9 +63,15 @@ export async function registerProviderRoutes(app: FastifyInstance, config: AppCo
     try {
       const provider = router.getProvider(parsed.data.provider);
       const availableModels = await registry.discoverModels(provider.id, controller.signal);
-      if (!availableModels.some((model) => model.id === parsed.data.model)) {
+      const selectedModel = availableModels.find((model) => model.id === parsed.data.model);
+      if (!selectedModel) {
         return reply.code(404).send({
           error: { code: "MODEL_NOT_FOUND", message: "مدل انتخاب‌شده در Ollama نصب نیست یا در دسترس قرار ندارد." },
+        });
+      }
+      if (!selectedModel.chatSupported) {
+        return reply.code(400).send({
+          error: { code: "MODEL_CAPABILITY_MISMATCH", message: "مدل انتخاب‌شده برای گفتگو مناسب نیست." },
         });
       }
 
@@ -99,7 +105,7 @@ export async function registerProviderRoutes(app: FastifyInstance, config: AppCo
           });
         }
         const providerError = error instanceof ProviderRequestError ? error : undefined;
-        return reply.code(providerError?.code === "PROVIDER_TIMEOUT" ? 504 : 503).send({
+        return reply.code(providerError?.code === "PROVIDER_TIMEOUT" || providerError?.code === "MODEL_UNLOAD_TIMEOUT" ? 504 : 503).send({
           error: {
             code: providerError?.code ?? "PROVIDER_UNAVAILABLE",
             message: "ارتباط با مدل محلی برقرار نشد.",
