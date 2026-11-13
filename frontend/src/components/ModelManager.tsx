@@ -10,16 +10,7 @@ import {
 
 type Props = { onClose: () => void };
 
-const initialProfiles: ModelConnectionProfile[] = [
-  {
-    id: "ollama-local",
-    name: "Ollama روی این سیستم",
-    providerId: "ollama",
-    connectionType: "local",
-    endpoint: "http://127.0.0.1:11434",
-    model: "qwen3:14b",
-  },
-];
+
 
 export default function ModelManager({ onClose }: Props) {
   const [activeTab, setActiveTab] = useState<"models" | "mcp">("models");
@@ -28,7 +19,7 @@ export default function ModelManager({ onClose }: Props) {
   const [profileName, setProfileName] = useState("");
   const [endpoint, setEndpoint] = useState("https://openrouter.ai/api/v1");
   const [model, setModel] = useState("");
-  const [profiles, setProfiles] = useState(initialProfiles);
+  const [profiles, setProfiles] = useState<ModelConnectionProfile[]>([]);
   const [mcpServers, setMcpServers] = useState<McpServerProfile[]>([]);
   const [serverName, setServerName] = useState("");
   const [transport, setTransport] = useState<McpTransport>("stdio");
@@ -157,18 +148,26 @@ export default function ModelManager({ onClose }: Props) {
             </form>
 
             <div className="manager-list-heading"><h3>پیکربندی‌های فعلی</h3><span>{profiles.length} مورد</span></div>
-            <div className="connection-list">
-              {profiles.map((profile) => (
-                <article className="connection-item" key={profile.id}>
-                  <span className="connection-item-icon"><Cpu size={17} /></span>
-                  <div className="connection-item-copy">
-                    <strong>{profile.name}</strong>
-                    <small dir="ltr">{profile.model} · {profile.endpoint}</small>
-                  </div>
-                  <span className="connection-draft">پیکربندی محلی</span>
-                </article>
-              ))}
-            </div>
+            {profiles.length === 0 ? (
+              <div className="manager-empty">
+                <Cpu size={22} />
+                <strong>هنوز پیکربندی مدلی ثبت نشده است</strong>
+                <span>مدل‌های نصب‌شده Ollama پس از پیاده‌سازی Backend به‌صورت پویا شناسایی می‌شوند.</span>
+              </div>
+            ) : (
+              <div className="connection-list">
+                {profiles.map((profile) => (
+                  <article className="connection-item" key={profile.id}>
+                    <span className="connection-item-icon"><Cpu size={17} /></span>
+                    <div className="connection-item-copy">
+                      <strong>{profile.name}</strong>
+                      <small dir="ltr">{profile.model} · {profile.endpoint}</small>
+                    </div>
+                    <span className="connection-draft">پیکربندی محلی</span>
+                  </article>
+                ))}
+              </div>
+            )}
           </div>
         ) : (
           <div className="manager-content">
