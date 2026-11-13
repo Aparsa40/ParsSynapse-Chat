@@ -83,6 +83,9 @@ export async function registerProviderRoutes(app: FastifyInstance, config: AppCo
       });
 
       reply.hijack();
+      // SSE can remain idle while Ollama loads a model or generates its first token.
+      // Disable the socket inactivity timeout for this response only; provider and request timeouts remain enforced.
+      reply.raw.socket?.setTimeout(0);
       reply.raw.writeHead(200, {
         "content-type": "text/event-stream; charset=utf-8",
         "cache-control": "no-cache, no-transform",
