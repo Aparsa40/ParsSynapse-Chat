@@ -14,7 +14,27 @@ async function startMockOllama(): Promise<{ server: Server; baseUrl: string }> {
     }
     if (request.url === "/api/tags") {
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ models: [{ name: "test-model:latest", digest: "test", size: 42 }] }));
+      response.end(JSON.stringify({ models: [
+        { name: "test-model:latest", digest: "test", size: 42 },
+        { name: "embedding-model:latest", digest: "embed", size: 21 },
+      ] }));
+      return;
+    }
+    if (request.url === "/api/show") {
+      let body = "";
+      request.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+      request.on("end", () => {
+        const payload = JSON.parse(body) as { model?: string };
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          capabilities: payload.model?.startsWith("embedding") ? ["embedding"] : ["completion"],
+        }));
+      });
+      return;
+    }
+    if (request.url === "/api/ps") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ models: [] }));
       return;
     }
     if (request.url === "/api/chat") {
@@ -59,6 +79,8 @@ test("provider endpoints report health and discover live Ollama models", async (
     });
     assert.equal(modelsResponse.statusCode, 200);
     assert.equal(modelsResponse.json().models[0].id, "test-model:latest");
+    assert.equal(modelsResponse.json().models[0].chatSupported, true);
+    assert.equal(modelsResponse.json().models[1].chatSupported, false);
   } finally {
     await app.close();
     await new Promise<void>((resolve, reject) => mock.server.close((error) => error ? reject(error) : resolve()));
@@ -107,6 +129,19 @@ test("chat endpoint validates input and streams Ollama output as SSE", async () 
     });
     assert.equal(missingModel.statusCode, 404);
     assert.equal(missingModel.json().error.code, "MODEL_NOT_FOUND");
+
+    const embeddingModel = await app.inject({
+      method: "POST",
+      url: "/api/v1/chat/completions",
+      headers: { host: "127.0.0.1:4000" },
+      payload: {
+        provider: "ollama",
+        model: "embedding-model:latest",
+        messages: [{ role: "user", content: "hello" }],
+      },
+    });
+    assert.equal(embeddingModel.statusCode, 400);
+    assert.equal(embeddingModel.json().error.code, "MODEL_CAPABILITY_MISMATCH");
 
     await app.listen({ host: "127.0.0.1", port: 0 });
     const address = app.server.address() as AddressInfo;
