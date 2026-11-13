@@ -8,7 +8,7 @@ import type {
 export class ProviderRequestError extends Error {
   constructor(
     message: string,
-    readonly code: "PROVIDER_UNAVAILABLE" | "PROVIDER_TIMEOUT" | "MODEL_UNLOAD_TIMEOUT",
+    readonly code: "PROVIDER_UNAVAILABLE" | "PROVIDER_TIMEOUT",
   ) {
     super(message);
     this.name = "ProviderRequestError";
@@ -70,7 +70,7 @@ export class OllamaAdapter implements ProviderAdapter {
       return {
         providerId: this.id,
         status: "unavailable",
-        errorCode: error instanceof ProviderRequestError && error.code !== "MODEL_UNLOAD_TIMEOUT" ? error.code : "PROVIDER_UNAVAILABLE",
+        errorCode: error instanceof ProviderRequestError ? error.code : "PROVIDER_UNAVAILABLE",
       };
     }
   }
