@@ -36,14 +36,14 @@ test("Ollama adapter discovers models and their capabilities", async () => {
   assert.deepEqual(models[1].capabilities, ["embedding"]);
 });
 
-test("Ollama adapter yields streamed chat content and requests immediate unload", async () => {
+test("Ollama adapter yields streamed chat content and keeps the model loaded", async () => {
   const fakeFetch: typeof fetch = async (input, init) => {
     const url = String(input);
     if (url.endsWith("/api/chat")) {
-      const body = JSON.parse(String(init?.body)) as { model: string; stream: boolean; keep_alive: number };
+      const body = JSON.parse(String(init?.body)) as { model: string; stream: boolean; keep_alive: number | string };
       assert.equal(body.model, "llama3.2:1b");
       assert.equal(body.stream, true);
-      assert.equal(body.keep_alive, 0);
+      assert.equal(body.keep_alive, -1);
       return new Response([
         JSON.stringify({ message: { role: "assistant", content: "سلام " }, done: false }),
         JSON.stringify({ message: { role: "assistant", content: "دنیا" }, done: false }),
@@ -51,7 +51,6 @@ test("Ollama adapter yields streamed chat content and requests immediate unload"
         "",
       ].join("\n"), { status: 200 });
     }
-    if (url.endsWith("/api/ps")) return new Response(JSON.stringify({ models: [] }), { status: 200 });
     throw new Error(`Unexpected Ollama request: ${url}`);
   };
   const adapter = new OllamaAdapter("http://127.0.0.1:11434", 2_000, fakeFetch);
@@ -64,7 +63,7 @@ test("Ollama adapter yields streamed chat content and requests immediate unload"
   assert.deepEqual(chunks, ["سلام ", "دنیا"]);
 });
 
-test("Ollama adapter serializes concurrent chat requests until unload is confirmed", async () => {
+test("Ollama adapter serializes concurrent chat requests while retaining the loaded model", async () => {
   let activeChats = 0;
   let maximumActiveChats = 0;
   const fakeFetch: typeof fetch = async (input) => {
