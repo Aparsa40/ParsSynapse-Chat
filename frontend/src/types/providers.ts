@@ -46,7 +46,7 @@ export const modelProviderPresets: ModelProviderPreset[] = [
   },
   {
     id: "google-gemini",
-    name: "Google Gemini",
+    name: "Google AI Studio (Gemini API)",
     connectionType: "api",
     endpoint: "https://generativelanguage.googleapis.com",
     description: "اتصال مستقیم به مدل‌های Gemini از طریق Google API",
