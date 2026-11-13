@@ -141,8 +141,10 @@ export class OllamaAdapter implements ProviderAdapter {
       body: JSON.stringify({ model: previousModel, prompt: "", stream: false, keep_alive: 0 }),
     }, signal);
     if (!response.ok) {
+      await response.body?.cancel();
       throw new ProviderRequestError("Ollama could not unload the previous model before switching.", "PROVIDER_UNAVAILABLE");
     }
+    await response.arrayBuffer();
     await this.waitForModelUnload(previousModel, signal);
     this.activeModel = null;
   }
