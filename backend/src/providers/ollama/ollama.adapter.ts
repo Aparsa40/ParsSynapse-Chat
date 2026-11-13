@@ -29,6 +29,10 @@ interface OllamaShowResponse {
   capabilities?: string[];
 }
 
+interface OllamaPsResponse {
+  models?: Array<{ name?: string; model?: string }>;
+}
+
 function requestSignal(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
   const timeout = AbortSignal.timeout(timeoutMs);
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
@@ -38,6 +42,7 @@ export class OllamaAdapter implements ProviderAdapter {
   readonly id = "ollama";
   readonly name = "Ollama";
   private chatQueue: Promise<void> = Promise.resolve();
+  private activeModel: string | null = null;
 
   constructor(
     private readonly baseUrl: string,
@@ -113,6 +118,35 @@ export class OllamaAdapter implements ProviderAdapter {
     return models.filter((model): model is ModelDescriptor => model !== null);
   }
 
+  private async waitForModelUnload(model: string, signal?: AbortSignal): Promise<void> {
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      if (signal?.aborted) throw signal.reason ?? new Error("Request aborted.");
+      const response = await this.request("/api/ps", {}, signal);
+      if (!response.ok) throw new ProviderRequestError("Could not verify Ollama model switch.", "PROVIDER_UNAVAILABLE");
+      const payload = await response.json() as OllamaPsResponse;
+      const stillLoaded = (payload.models ?? []).some((item) => (item.name ?? item.model) === model);
+      if (!stillLoaded) return;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    throw new ProviderRequestError("Ollama did not release the previous model in time.", "PROVIDER_TIMEOUT");
+  }
+
+  private async unloadActiveModel(signal?: AbortSignal): Promise<void> {
+    if (!this.activeModel) return;
+    const previousModel = this.activeModel;
+    const response = await this.request("/api/generate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: previousModel, prompt: "", stream: false, keep_alive: 0 }),
+    }, signal);
+    if (!response.ok) {
+      throw new ProviderRequestError("Ollama could not unload the previous model before switching.", "PROVIDER_UNAVAILABLE");
+    }
+    await this.waitForModelUnload(previousModel, signal);
+    this.activeModel = null;
+  }
+
   async *chatStream(options: {
     model: string;
     messages: ChatMessage[];
@@ -125,6 +159,9 @@ export class OllamaAdapter implements ProviderAdapter {
 
     try {
       if (options.signal?.aborted) throw options.signal.reason ?? new Error("Request aborted.");
+      if (this.activeModel && this.activeModel !== options.model) {
+        await this.unloadActiveModel(options.signal);
+      }
 
       const response = await this.request("/api/chat", {
         method: "POST",
@@ -142,6 +179,7 @@ export class OllamaAdapter implements ProviderAdapter {
         await response.body?.cancel();
         throw new ProviderRequestError("Ollama chat request failed.", "PROVIDER_UNAVAILABLE");
       }
+      this.activeModel = options.model;
       if (!response.body) throw new ProviderRequestError("Ollama returned an empty stream.", "PROVIDER_UNAVAILABLE");
 
       const reader = response.body.getReader();
