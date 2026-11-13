@@ -85,20 +85,26 @@ export class OllamaAdapter implements ProviderAdapter {
     if (!response.ok) throw new ProviderRequestError("Ollama model discovery failed.", "PROVIDER_UNAVAILABLE");
     const payload = await response.json() as OllamaTagsResponse;
 
-    return Promise.all((payload.models ?? []).flatMap(async (model) => {
+    const models = await Promise.all((payload.models ?? []).map(async (model): Promise<ModelDescriptor | null> => {
       const id = model.name ?? model.model;
-      if (!id) return [];
-      const showResponse = await this.request("/api/show", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ model: id }),
-      }, signal);
-      if (!showResponse.ok) {
-        throw new ProviderRequestError("Ollama model capabilities could not be determined.", "PROVIDER_UNAVAILABLE");
+      if (!id) return null;
+
+      let capabilities: string[] = [];
+      try {
+        const showResponse = await this.request("/api/show", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ model: id }),
+        }, signal);
+        if (showResponse.ok) {
+          const show = await showResponse.json() as OllamaShowResponse;
+          capabilities = show.capabilities ?? [];
+        }
+      } catch (error) {
+        if (signal?.aborted) throw error;
       }
-      const show = await showResponse.json() as OllamaShowResponse;
-      const capabilities = show.capabilities ?? [];
-      return [{
+
+      return {
         id,
         name: id,
         providerId: this.id,
@@ -107,8 +113,9 @@ export class OllamaAdapter implements ProviderAdapter {
         modifiedAt: model.modified_at ?? "",
         capabilities,
         chatSupported: capabilities.includes("completion"),
-      }];
-    })).then((models) => models.flat());
+      };
+    }));
+    return models.filter((model): model is ModelDescriptor => model !== null);
   }
 
   private async waitForModelUnload(model: string): Promise<void> {
