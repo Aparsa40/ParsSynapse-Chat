@@ -98,25 +98,54 @@ export default function App() {
   const selectedModel = chatModels.find((model) => model.id === selectedModelId);
   const isThinking = Boolean(sendingByConversation[activeId]);
 
+  const refreshModels = async (signal?: AbortSignal): Promise<string> => {
+    const [providerResult, modelResult] = await Promise.allSettled([
+      getProviders(signal),
+      getModels(signal),
+    ]);
+
+    if (signal?.aborted) return "بازخوانی لغو شد.";
+
+    if (providerResult.status === "fulfilled") {
+      setProviderStatus(
+        providerResult.value.some((provider) => provider.id === "ollama" && provider.status === "connected")
+          ? "connected"
+          : "unavailable",
+      );
+    } else {
+      setProviderStatus("unavailable");
+    }
+
+    if (modelResult.status === "fulfilled") {
+      const discoveredModels = modelResult.value;
+      setModels(discoveredModels);
+      setSelectedModelId((current) =>
+        discoveredModels.some((model) => model.id === current && model.chatSupported)
+          ? current
+          : discoveredModels.find((model) => model.chatSupported)?.id ?? "",
+      );
+    } else {
+      setModels([]);
+      setSelectedModelId("");
+    }
+
+    const errors = [
+      providerResult.status === "rejected" ? providerResult.reason : null,
+      modelResult.status === "rejected" ? modelResult.reason : null,
+    ].filter(Boolean);
+    if (errors.length > 0) {
+      const message = errors[0] instanceof Error ? errors[0].message : "بازخوانی اتصال‌ها کامل نشد.";
+      setBackendError(message);
+      return message;
+    }
+
+    setBackendError(null);
+    return `بازخوانی انجام شد؛ ${modelResult.status === "fulfilled" ? modelResult.value.length : 0} مدل از Providerهای فعلی دریافت شد.`;
+  };
+
   useEffect(() => {
     const controller = new AbortController();
-    void Promise.all([getProviders(controller.signal), getModels(controller.signal)])
-      .then(([providers, discoveredModels]) => {
-        if (controller.signal.aborted) return;
-        setModels(discoveredModels);
-        setSelectedModelId((current) =>
-          discoveredModels.some((model) => model.id === current && model.chatSupported)
-            ? current
-            : discoveredModels.find((model) => model.chatSupported)?.id ?? "",
-        );
-        setProviderStatus(providers.some((provider) => provider.id === "ollama" && provider.status === "connected") ? "connected" : "unavailable");
-        setBackendError(null);
-      })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-        setProviderStatus("unavailable");
-        setBackendError(error instanceof Error ? error.message : "ارتباط با Backend برقرار نشد.");
-      });
+    void refreshModels(controller.signal);
     return () => controller.abort();
   }, []);
 
@@ -220,23 +249,6 @@ export default function App() {
     controllersRef.current.get(activeId)?.abort();
   };
 
-  const refreshModels = async () => {
-    try {
-      const [providers, discoveredModels] = await Promise.all([getProviders(), getModels()]);
-      setModels(discoveredModels);
-      setSelectedModelId((current) =>
-        discoveredModels.some((model) => model.id === current && model.chatSupported)
-          ? current
-          : discoveredModels.find((model) => model.chatSupported)?.id ?? "",
-      );
-      setProviderStatus(providers.some((provider) => provider.id === "ollama" && provider.status === "connected") ? "connected" : "unavailable");
-      setBackendError(null);
-    } catch (error) {
-      setProviderStatus("unavailable");
-      setBackendError(error instanceof Error ? error.message : "ارتباط با Backend برقرار نشد.");
-    }
-  };
-
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -313,7 +325,7 @@ export default function App() {
         </div>
       </aside>
 
-      {modelManagerOpen && <ModelManager onClose={() => setModelManagerOpen(false)} />}
+      {modelManagerOpen && <ModelManager onClose={() => setModelManagerOpen(false)} onRefreshModels={() => refreshModels()} />}
 
       <main className="main-panel">
         <header className="topbar">
