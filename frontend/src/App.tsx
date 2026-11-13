@@ -1,4 +1,5 @@
 import ModelManager from "./components/ModelManager";
+import { getModels, getProviders, streamChat, type ModelDescriptor } from "./lib/api";
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import {
   ArrowDown,
@@ -15,6 +16,7 @@ import {
   Settings2,
   Sparkles,
   SquarePen,
+  Square,
 } from "lucide-react";
 
 type Message = {
@@ -92,8 +94,12 @@ export default function App() {
   const [input, setInput] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState("ParsSynapse Auto");
-  const [isThinking, setIsThinking] = useState(false);
+  const [selectedModelId, setSelectedModelId] = useState("");
+  const [models, setModels] = useState<ModelDescriptor[]>([]);
+  const [providerStatus, setProviderStatus] = useState<"checking" | "connected" | "unavailable">("checking");
+  const [backendError, setBackendError] = useState<string | null>(null);
+  const [sendingByConversation, setSendingByConversation] = useState<Record<string, boolean>>({});
+  const controllersRef = useRef<Map<string, AbortController>>(new Map());
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [modelManagerOpen, setModelManagerOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -102,6 +108,31 @@ export default function App() {
   const activeConversation = conversations.find((item) => item.id === activeId);
   const messages = activeConversation?.messages ?? [];
   const hasMessages = messages.length > 0;
+  const chatModels = models.filter((model) => model.chatSupported);
+  const selectedModel = chatModels.find((model) => model.id === selectedModelId);
+  const isThinking = Boolean(sendingByConversation[activeId]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void Promise.all([getProviders(controller.signal), getModels(controller.signal)])
+      .then(([providers, discoveredModels]) => {
+        if (controller.signal.aborted) return;
+        setModels(discoveredModels);
+        setSelectedModelId((current) =>
+          discoveredModels.some((model) => model.id === current && model.chatSupported)
+            ? current
+            : discoveredModels.find((model) => model.chatSupported)?.id ?? "",
+        );
+        setProviderStatus(providers.some((provider) => provider.id === "ollama" && provider.status === "connected") ? "connected" : "unavailable");
+        setBackendError(null);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setProviderStatus("unavailable");
+        setBackendError(error instanceof Error ? error.message : "ارتباط با Backend برقرار نشد.");
+      });
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -124,54 +155,106 @@ export default function App() {
     setSidebarOpen(false);
   };
 
-  const sendMessage = (event?: FormEvent<HTMLFormElement>) => {
+  const sendMessage = async (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
     const content = input.trim();
-    if (!content || isThinking) return;
+    if (!content || sendingByConversation[activeId]) return;
+    if (!selectedModel) {
+      setBackendError("مدل سازگار با گفتگو در دسترس نیست. وضعیت Ollama و فهرست مدل‌ها را بررسی کن.");
+      return;
+    }
 
-    const userMessage: Message = { id: makeId(), role: "user", content };
     const conversationId = activeId;
+    const userMessage: Message = { id: makeId(), role: "user", content };
+    const assistantMessage: Message = { id: makeId(), role: "assistant", content: "" };
+    const history = [...messages, userMessage];
+    const controller = new AbortController();
+    controllersRef.current.set(conversationId, controller);
 
     setConversations((current) =>
       current.map((conversation) =>
         conversation.id === conversationId
           ? {
               ...conversation,
-              title: conversation.messages.length === 0
-                ? content.slice(0,  thirtyFive)
-                : conversation.title,
-              messages: [...conversation.messages, userMessage],
+              title: conversation.messages.length === 0 ? content.slice(0, thirtyFive) : conversation.title,
+              messages: [...conversation.messages, userMessage, assistantMessage],
             }
           : conversation,
       ),
     );
-
     setInput("");
-    setIsThinking(true);
+    setBackendError(null);
+    setSendingByConversation((current) => ({ ...current, [conversationId]: true }));
 
-    // Temporary UI-only response. The real provider call will live in the backend.
-    window.setTimeout(() => {
-      const assistantMessage: Message = {
-        id: makeId(),
-        role: "assistant",
-        content: createDemoReply(content),
-      };
-
+    try {
+      await streamChat({
+        model: selectedModel.id,
+        messages: history.map((message) => ({ role: message.role, content: message.content })),
+        signal: controller.signal,
+        onDelta: (delta) => {
+          setConversations((current) =>
+            current.map((conversation) =>
+              conversation.id === conversationId
+                ? {
+                    ...conversation,
+                    messages: conversation.messages.map((message) =>
+                      message.id === assistantMessage.id ? { ...message, content: message.content + delta } : message,
+                    ),
+                  }
+                : conversation,
+            ),
+          );
+        },
+      });
+    } catch (error) {
+      const message = controller.signal.aborted
+        ? "درخواست گفتگو متوقف شد."
+        : error instanceof Error ? error.message : "در دریافت پاسخ از مدل خطایی رخ داد.";
       setConversations((current) =>
         current.map((conversation) =>
           conversation.id === conversationId
-            ? { ...conversation, messages: [...conversation.messages, assistantMessage] }
+            ? {
+                ...conversation,
+                messages: conversation.messages.map((item) =>
+                  item.id === assistantMessage.id
+                    ? { ...item, content: item.content ? `${item.content}\\n\\n${message}` : message }
+                    : item,
+                ),
+              }
             : conversation,
         ),
       );
-      setIsThinking(false);
-    }, 650);
+    } finally {
+      controllersRef.current.delete(conversationId);
+      setSendingByConversation((current) => ({ ...current, [conversationId]: false }));
+    }
+  };
+
+  const stopActiveChat = () => {
+    controllersRef.current.get(activeId)?.abort();
+  };
+
+  const refreshModels = async () => {
+    try {
+      const [providers, discoveredModels] = await Promise.all([getProviders(), getModels()]);
+      setModels(discoveredModels);
+      setSelectedModelId((current) =>
+        discoveredModels.some((model) => model.id === current && model.chatSupported)
+          ? current
+          : discoveredModels.find((model) => model.chatSupported)?.id ?? "",
+      );
+      setProviderStatus(providers.some((provider) => provider.id === "ollama" && provider.status === "connected") ? "connected" : "unavailable");
+      setBackendError(null);
+    } catch (error) {
+      setProviderStatus("unavailable");
+      setBackendError(error instanceof Error ? error.message : "ارتباط با Backend برقرار نشد.");
+    }
   };
 
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      sendMessage();
+      void sendMessage();
     }
   };
 
@@ -260,18 +343,20 @@ export default function App() {
               </button>
               {modelMenuOpen && (
                 <div className="model-menu">
-                  <p>انتخاب مدل</p>
-                  {["ParsSynapse Auto", "Qwen3 (بعداً)", "OpenRouter (بعداً)"].map((model) => (
-                    <button key={model} onClick={() => { setSelectedModel(model); setModelMenuOpen(false); }}>
-                      <span>{model}</span>
-                      {selectedModel === model && <Check size={15} />}
+                  <p>مدل‌های قابل استفاده برای گفتگو</p>
+                  {chatModels.length === 0 ? (
+                    <small>مدل گفتگو شناسایی نشد. مدل‌های نصب‌شده و قابلیت‌های آن‌ها را بررسی کن.</small>
+                  ) : chatModels.map((model) => (
+                    <button key={model.id} onClick={() => { setSelectedModelId(model.id); setModelMenuOpen(false); }}>
+                      <span>{model.name}</span>
+                      {selectedModelId === model.id && <Check size={15} />}
                     </button>
                   ))}
-                  <small>اتصال Provider در مرحله Backend فعال می‌شود.</small>
+                  <button type="button" onClick={() => void refreshModels()}><span>بازخوانی فهرست مدل‌ها</span></button>
                 </div>
               )}
             </div>
-            <span className="environment-pill"><span /> محیط آزمایشی</span>
+            <span className={`environment-pill ${providerStatus === "connected" ? "provider-connected" : ""}`}><span /> {providerStatus === "checking" ? "در حال بررسی" : providerStatus === "connected" ? "Ollama متصل" : "Ollama قطع است"}</span>
           </div>
           <div className="topbar-end">
             <button className="share-button" onClick={() => void navigator.clipboard?.writeText(window.location.href)}>
@@ -365,12 +450,20 @@ export default function App() {
                 <button type="button" className="icon-button voice-button" title="ورودی صوتی (به‌زودی)" disabled>
                   <AudioLines size={18} />
                 </button>
-                <button type="submit" className="send-button" disabled={!input.trim() || isThinking} aria-label="ارسال پیام">
-                  {input.trim() ? <ArrowUp size={19} /> : <ArrowDown size={18} />}
+                <button
+                  type={isThinking ? "button" : "submit"}
+                  onClick={isThinking ? stopActiveChat : undefined}
+                  className="send-button"
+                  disabled={!isThinking && (!input.trim() || !selectedModel)}
+                  aria-label={isThinking ? "توقف پاسخ" : "ارسال پیام"}
+                  title={isThinking ? "توقف پاسخ" : "ارسال پیام"}
+                >
+                  {isThinking ? <Square size={15} /> : input.trim() ? <ArrowUp size={19} /> : <ArrowDown size={18} />}
                 </button>
               </div>
             </div>
           </form>
+          {backendError && <p className="disclaimer" role="status">{backendError}</p>}
           <p className="disclaimer">ParsSynapse ممکن است اشتباه کند. پاسخ‌های مهم را بررسی کن.</p>
         </footer>
       </main>
