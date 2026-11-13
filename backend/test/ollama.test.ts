@@ -61,13 +61,28 @@ test("Ollama adapter yields streamed chat content and keeps the model loaded", a
   })) chunks.push(chunk);
 
   assert.deepEqual(chunks, ["سلام ", "دنیا"]);
+
+  const secondTurn: string[] = [];
+  for await (const chunk of adapter.chatStream({
+    model: "llama3.2:1b",
+    messages: [{ role: "user", content: "دوباره سلام" }],
+  })) secondTurn.push(chunk);
+  assert.deepEqual(secondTurn, ["سلام ", "دنیا"]);
 });
 
-test("Ollama adapter serializes concurrent chat requests while retaining the loaded model", async () => {
+test("Ollama adapter serializes concurrent chat requests and unloads only when switching models", async () => {
   let activeChats = 0;
   let maximumActiveChats = 0;
+  let unloadCalls = 0;
   const fakeFetch: typeof fetch = async (input) => {
     const url = String(input);
+    if (url.endsWith("/api/generate")) {
+      unloadCalls += 1;
+      return new Response(JSON.stringify({}), { status: 200 });
+    }
+    if (url.endsWith("/api/ps")) {
+      return new Response(JSON.stringify({ models: [] }), { status: 200 });
+    }
     if (url.endsWith("/api/chat")) {
       activeChats += 1;
       maximumActiveChats = Math.max(maximumActiveChats, activeChats);
@@ -102,6 +117,7 @@ test("Ollama adapter serializes concurrent chat requests while retaining the loa
   assert.deepEqual(results, [["ok"], ["ok"]]);
   assert.equal(maximumActiveChats, 1);
   assert.equal(activeChats, 0);
+  assert.equal(unloadCalls, 1);
 });
 
 test("model registry and router resolve the Ollama adapter", async () => {
