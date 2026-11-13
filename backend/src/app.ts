@@ -61,16 +61,25 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
     });
   });
 
-  app.setErrorHandler((error, request, reply) => {
+  app.setErrorHandler((error: unknown, request, reply) => {
     request.log.error({ err: error }, "Unhandled request error");
-    const statusCode = error.statusCode && error.statusCode >= 400 && error.statusCode < 500
-      ? error.statusCode
-      : 500;
+
+    const candidateStatusCode =
+      typeof error === "object" && error !== null && "statusCode" in error
+        ? error.statusCode
+        : undefined;
+    const statusCode =
+      typeof candidateStatusCode === "number" &&
+      candidateStatusCode >= 400 &&
+      candidateStatusCode < 500
+        ? candidateStatusCode
+        : 500;
+    const message = error instanceof Error ? error.message : "Unknown request error";
 
     return reply.code(statusCode).send({
       error: {
         code: statusCode === 500 ? "INTERNAL_ERROR" : "REQUEST_ERROR",
-        message: statusCode === 500 ? "The request could not be completed." : error.message,
+        message: statusCode === 500 ? "The request could not be completed." : message,
       },
     });
   });
