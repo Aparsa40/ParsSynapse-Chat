@@ -164,7 +164,7 @@ test("chat endpoint validates input and streams Ollama output as SSE", async () 
     const body = await response.text();
     assert.match(body, /hello /);
     assert.match(body, /world/);
-    assert.match(body, /data: \[DONE\]/);
+    assert.ok(body.includes("data: [DONE]"));
   } finally {
     await app.close();
     await new Promise<void>((resolve, reject) => mock.server.close((error) => error ? reject(error) : resolve()));
