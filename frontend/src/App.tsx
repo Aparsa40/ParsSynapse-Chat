@@ -1,3 +1,4 @@
+import ModelManager from "./components/ModelManager";
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import {
   ArrowDown,
@@ -94,6 +95,7 @@ export default function App() {
   const [selectedModel, setSelectedModel] = useState("ParsSynapse Auto");
   const [isThinking, setIsThinking] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [modelManagerOpen, setModelManagerOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -242,12 +244,15 @@ export default function App() {
         </div>
       </aside>
 
+      {modelManagerOpen && <ModelManager onClose={() => setModelManagerOpen(false)} />}
+
       <main className="main-panel">
         <header className="topbar">
           <div className="topbar-start">
             <button className="icon-button mobile-menu" aria-label="باز کردن منو" onClick={() => setSidebarOpen(true)}>
               <Menu size={19} />
             </button>
+            <button className="icon-button model-settings-button" title="مدیریت اتصال‌ها" aria-label="مدیریت اتصال‌ها" onClick={() => setModelManagerOpen(true)}><Settings2 size={17} /></button>
             <div className="model-picker-wrap">
               <button className="model-picker" onClick={() => setModelMenuOpen((open) => !open)}>
                 <span>{selectedModel}</span>
