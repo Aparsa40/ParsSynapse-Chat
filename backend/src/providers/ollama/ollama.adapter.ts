@@ -8,7 +8,7 @@ import type {
 export class ProviderRequestError extends Error {
   constructor(
     message: string,
-    readonly code: "PROVIDER_UNAVAILABLE" | "PROVIDER_TIMEOUT",
+    readonly code: "PROVIDER_UNAVAILABLE" | "PROVIDER_TIMEOUT" | "MODEL_UNLOAD_TIMEOUT",
   ) {
     super(message);
     this.name = "ProviderRequestError";
@@ -25,6 +25,14 @@ interface OllamaTagsResponse {
   }>;
 }
 
+interface OllamaShowResponse {
+  capabilities?: string[];
+}
+
+interface OllamaPsResponse {
+  models?: Array<{ name?: string; model?: string }>;
+}
+
 function requestSignal(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
   const timeout = AbortSignal.timeout(timeoutMs);
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
@@ -33,6 +41,8 @@ function requestSignal(signal: AbortSignal | undefined, timeoutMs: number): Abor
 export class OllamaAdapter implements ProviderAdapter {
   readonly id = "ollama";
   readonly name = "Ollama";
+  private chatQueue: Promise<void> = Promise.resolve();
+  private lifecycleBlocked = false;
 
   constructor(
     private readonly baseUrl: string,
@@ -74,9 +84,20 @@ export class OllamaAdapter implements ProviderAdapter {
     const response = await this.request("/api/tags", {}, signal);
     if (!response.ok) throw new ProviderRequestError("Ollama model discovery failed.", "PROVIDER_UNAVAILABLE");
     const payload = await response.json() as OllamaTagsResponse;
-    return (payload.models ?? []).flatMap((model) => {
+
+    return Promise.all((payload.models ?? []).flatMap(async (model) => {
       const id = model.name ?? model.model;
       if (!id) return [];
+      const showResponse = await this.request("/api/show", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model: id }),
+      }, signal);
+      if (!showResponse.ok) {
+        throw new ProviderRequestError("Ollama model capabilities could not be determined.", "PROVIDER_UNAVAILABLE");
+      }
+      const show = await showResponse.json() as OllamaShowResponse;
+      const capabilities = show.capabilities ?? [];
       return [{
         id,
         name: id,
@@ -84,8 +105,23 @@ export class OllamaAdapter implements ProviderAdapter {
         digest: model.digest ?? "",
         size: model.size ?? 0,
         modifiedAt: model.modified_at ?? "",
+        capabilities,
+        chatSupported: capabilities.includes("completion"),
       }];
-    });
+    })).then((models) => models.flat());
+  }
+
+  private async waitForModelUnload(model: string): Promise<void> {
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      const response = await this.request("/api/ps");
+      if (!response.ok) throw new ProviderRequestError("Could not verify Ollama model unload.", "MODEL_UNLOAD_TIMEOUT");
+      const payload = await response.json() as OllamaPsResponse;
+      const stillLoaded = (payload.models ?? []).some((item) => (item.name ?? item.model) === model);
+      if (!stillLoaded) return;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    throw new ProviderRequestError("Ollama did not unload the previous model in time.", "MODEL_UNLOAD_TIMEOUT");
   }
 
   async *chatStream(options: {
@@ -93,46 +129,70 @@ export class OllamaAdapter implements ProviderAdapter {
     messages: ChatMessage[];
     signal?: AbortSignal;
   }): AsyncGenerator<string> {
-    const response = await this.request("/api/chat", {
-      method: "POST",
-      headers: { "content-type": "application/json", accept: "application/x-ndjson" },
-      body: JSON.stringify({
-        model: options.model,
-        messages: options.messages,
-        stream: true,
-      }),
-    }, options.signal);
+    const previous = this.chatQueue;
+    let release!: () => void;
+    this.chatQueue = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
 
-    if (!response.ok) {
-      await response.body?.cancel();
-      throw new ProviderRequestError("Ollama chat request failed.", "PROVIDER_UNAVAILABLE");
-    }
-    if (!response.body) throw new ProviderRequestError("Ollama returned an empty stream.", "PROVIDER_UNAVAILABLE");
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
+    let lifecycleError: unknown;
     try {
-      while (true) {
-        const { done, value } = await reader.read();
-        buffer += decoder.decode(value, { stream: !done });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          const chunk = JSON.parse(line) as { message?: { content?: string }; error?: string };
+      if (this.lifecycleBlocked) {
+        throw new ProviderRequestError("Ollama model lifecycle is blocked because a previous model could not be unloaded. Restart the local backend after checking Ollama.", "MODEL_UNLOAD_TIMEOUT");
+      }
+      if (options.signal?.aborted) throw options.signal.reason ?? new Error("Request aborted.");
+
+      const response = await this.request("/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/x-ndjson" },
+        body: JSON.stringify({
+          model: options.model,
+          messages: options.messages,
+          stream: true,
+          keep_alive: 0,
+        }),
+      }, options.signal);
+
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new ProviderRequestError("Ollama chat request failed.", "PROVIDER_UNAVAILABLE");
+      }
+      if (!response.body) throw new ProviderRequestError("Ollama returned an empty stream.", "PROVIDER_UNAVAILABLE");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          buffer += decoder.decode(value, { stream: !done });
+          const lines = buffer.split("\\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const chunk = JSON.parse(line) as { message?: { content?: string }; error?: string };
+            if (chunk.error) throw new ProviderRequestError("Ollama reported a generation error.", "PROVIDER_UNAVAILABLE");
+            if (chunk.message?.content) yield chunk.message.content;
+          }
+          if (done) break;
+        }
+        if (buffer.trim()) {
+          const chunk = JSON.parse(buffer) as { message?: { content?: string }; error?: string };
           if (chunk.error) throw new ProviderRequestError("Ollama reported a generation error.", "PROVIDER_UNAVAILABLE");
           if (chunk.message?.content) yield chunk.message.content;
         }
-        if (done) break;
-      }
-      if (buffer.trim()) {
-        const chunk = JSON.parse(buffer) as { message?: { content?: string }; error?: string };
-        if (chunk.error) throw new ProviderRequestError("Ollama reported a generation error.", "PROVIDER_UNAVAILABLE");
-        if (chunk.message?.content) yield chunk.message.content;
+      } finally {
+        reader.releaseLock();
       }
     } finally {
-      reader.releaseLock();
+      try {
+        await this.waitForModelUnload(options.model);
+      } catch (error) {
+        this.lifecycleBlocked = true;
+        lifecycleError = error;
+      } finally {
+        release();
+      }
     }
+    if (lifecycleError) throw lifecycleError;
   }
 }
