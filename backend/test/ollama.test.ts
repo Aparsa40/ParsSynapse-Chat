@@ -99,7 +99,6 @@ test("Ollama adapter serializes concurrent chat requests and unloads only when s
       });
       return new Response(body, { status: 200 });
     }
-    if (url.endsWith("/api/ps")) return new Response(JSON.stringify({ models: [] }), { status: 200 });
     throw new Error(`Unexpected Ollama request: ${url}`);
   };
 
