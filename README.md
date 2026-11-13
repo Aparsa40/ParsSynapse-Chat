@@ -4,19 +4,20 @@ A Persian-first, local-first AI chat workspace designed for hybrid local and clo
 
 ## Project status
 
-**Current milestone:** Frontend foundation and Backend Core foundation.
+**Current milestone:** Phase 2 — Provider Architecture and Ollama integration.
 
 - React + Vite + TypeScript frontend.
 - Fastify 5 + TypeScript backend.
-- Backend health endpoint and baseline local-service protections.
-- Provider integration, chat persistence, memory, RAG and MCP runtime are planned as incremental milestones; they are not yet implemented.
+- Provider adapter contract, Model Registry and Model Router.
+- Ollama local provider with dynamic model discovery and streaming chat API.
+- Frontend real-chat integration, cloud providers, persistence, memory, RAG and MCP runtime remain incremental milestones.
 
 ## Architecture
 
 ```text
 ParsSynapse-Chat/
 ├── frontend/   # React + Vite + TypeScript
-└── backend/    # Fastify + TypeScript API
+└── backend/    # Fastify + TypeScript API and provider runtime
 ```
 
 The frontend communicates with providers through the backend. Provider credentials must never be exposed in browser code.
@@ -25,12 +26,13 @@ The frontend communicates with providers through the backend. Provider credentia
 
 - Node.js 22+
 - npm 10+
+- Ollama for local model features.
 
 ## Run the frontend
 
 ```powershell
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
@@ -43,13 +45,9 @@ npm install
 npm run dev
 ```
 
-The backend listens on `http://127.0.0.1:4000` by default. Check it with:
+The backend listens on `http://127.0.0.1:4000` by default.
 
-```powershell
-Invoke-RestMethod http://127.0.0.1:4000/api/v1/health
-```
-
-## Backend validation
+## Validate the backend
 
 From `backend/`:
 
@@ -58,6 +56,15 @@ npm run typecheck
 npm test
 npm run build
 ```
+
+## Provider API
+
+- `GET /api/v1/health` — backend process health.
+- `GET /api/v1/providers` — provider status.
+- `GET /api/v1/models` — dynamically discovered Ollama models.
+- `POST /api/v1/chat/completions` — streaming chat via Server-Sent Events.
+
+Ollama defaults to `http://127.0.0.1:11434`. Model IDs are discovered at runtime; no particular model is assumed to be installed.
 
 ## Architecture principles
 
@@ -73,4 +80,4 @@ npm run build
 
 ## Important
 
-The current chat UI still uses demo responses. The backend health endpoint confirms only that the local API process is running; it does not indicate that any model provider is connected.
+The current chat UI still uses demo responses. The backend Ollama APIs are available, but the frontend has not yet been connected to the real chat API.

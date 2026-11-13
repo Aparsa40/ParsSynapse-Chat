@@ -3,6 +3,7 @@ import helmet from "@fastify/helmet";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { AppConfig } from "./config/env.js";
 import { registerHealthRoutes } from "./routes/health.js";
+import { registerProviderRoutes } from "./routes/provider.routes.js";
 
 const allowedLocalHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
@@ -85,5 +86,6 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
   });
 
   await registerHealthRoutes(app);
+  await registerProviderRoutes(app, config);
   return app;
 }
