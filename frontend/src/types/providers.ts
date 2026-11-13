@@ -58,6 +58,6 @@ export const modelProviderPresets: ModelProviderPreset[] = [
     connectionType: "local",
     endpoint: "http://127.0.0.1:11434",
     description: "اجرای مدل‌های نصب‌شده روی سیستم شخصی از طریق Ollama",
-    defaultModel: "qwen3:14b",
+    defaultModel: "",
   },
 ];
