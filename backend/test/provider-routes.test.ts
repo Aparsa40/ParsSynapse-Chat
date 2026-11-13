@@ -5,7 +5,7 @@ import test from "node:test";
 import { buildApp } from "../src/app.js";
 import { loadConfig } from "../src/config/env.js";
 
-async function startMockOllama(): Promise<{ server: Server; baseUrl: string }> {
+async function startMockOllama(chatDelayMs = 0): Promise<{ server: Server; baseUrl: string }> {
   const server = createServer((request, response) => {
     if (request.url === "/api/version") {
       response.writeHead(200, { "content-type": "application/json" });
@@ -38,13 +38,17 @@ async function startMockOllama(): Promise<{ server: Server; baseUrl: string }> {
       return;
     }
     if (request.url === "/api/chat") {
-      response.writeHead(200, { "content-type": "application/x-ndjson" });
-      response.end([
-        JSON.stringify({ message: { role: "assistant", content: "hello " }, done: false }),
-        JSON.stringify({ message: { role: "assistant", content: "world" }, done: false }),
-        JSON.stringify({ message: { role: "assistant", content: "" }, done: true }),
-        "",
-      ].join("\n"));
+      const sendChatResponse = () => {
+        response.writeHead(200, { "content-type": "application/x-ndjson" });
+        response.end([
+          JSON.stringify({ message: { role: "assistant", content: "hello " }, done: false }),
+          JSON.stringify({ message: { role: "assistant", content: "world" }, done: false }),
+          JSON.stringify({ message: { role: "assistant", content: "" }, done: true }),
+          "",
+        ].join("\n"));
+      };
+      if (chatDelayMs > 0) setTimeout(sendChatResponse, chatDelayMs);
+      else sendChatResponse();
       return;
     }
     response.writeHead(404);
@@ -161,6 +165,42 @@ test("chat endpoint validates input and streams Ollama output as SSE", async () 
     assert.match(body, /hello /);
     assert.match(body, /world/);
     assert.match(body, /data: \[DONE\]/);
+  } finally {
+    await app.close();
+    await new Promise<void>((resolve, reject) => mock.server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("chat SSE remains connected when Ollama takes longer than the socket idle timeout", async () => {
+  const mock = await startMockOllama(1_500);
+  const app = await buildApp(loadConfig({
+    NODE_ENV: "test",
+    LOG_LEVEL: "silent",
+    OLLAMA_BASE_URL: mock.baseUrl,
+  }));
+  try {
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    // Simulate a short server socket idle timeout. The SSE route must disable it
+    // after the response is hijacked because model loading can take much longer.
+    app.server.setTimeout(500);
+    const address = app.server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "ollama",
+        model: "test-model:latest",
+        messages: [{ role: "user", content: "hello" }],
+        stream: true,
+      }),
+    });
+
+    assert.equal(response.status, 200);
+    const body = await response.text();
+    assert.match(body, /hello /);
+    assert.match(body, /world/);
+    assert.match(body, /data: \\[DONE\\]/);
   } finally {
     await app.close();
     await new Promise<void>((resolve, reject) => mock.server.close((error) => error ? reject(error) : resolve()));
