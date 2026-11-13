@@ -64,6 +64,46 @@ test("Ollama adapter yields streamed chat content and requests immediate unload"
   assert.deepEqual(chunks, ["سلام ", "دنیا"]);
 });
 
+test("Ollama adapter serializes concurrent chat requests until unload is confirmed", async () => {
+  let activeChats = 0;
+  let maximumActiveChats = 0;
+  const fakeFetch: typeof fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/api/chat")) {
+      activeChats += 1;
+      maximumActiveChats = Math.max(maximumActiveChats, activeChats);
+      const body = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+          controller.enqueue(new TextEncoder().encode(JSON.stringify({
+            message: { role: "assistant", content: "ok" },
+            done: true,
+          }) + "\\n"));
+          controller.close();
+          activeChats -= 1;
+        },
+      });
+      return new Response(body, { status: 200 });
+    }
+    if (url.endsWith("/api/ps")) return new Response(JSON.stringify({ models: [] }), { status: 200 });
+    throw new Error(`Unexpected Ollama request: ${url}`);
+  };
+
+  const adapter = new OllamaAdapter("http://127.0.0.1:11434", 2_000, fakeFetch);
+  const run = async (model: string) => {
+    for await (const _chunk of adapter.chatStream({
+      model,
+      messages: [{ role: "user", content: "test" }],
+    })) {
+      // Consume the stream to release the lifecycle lock.
+    }
+  };
+
+  await Promise.all([run("model-a"), run("model-b")]);
+  assert.equal(maximumActiveChats, 1);
+  assert.equal(activeChats, 0);
+});
+
 test("model registry and router resolve the Ollama adapter", async () => {
   const fakeFetch: typeof fetch = async (input) => {
     if (String(input).endsWith("/api/tags")) return new Response(JSON.stringify({ models: [] }), { status: 200 });
