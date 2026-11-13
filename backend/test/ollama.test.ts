@@ -6,7 +6,7 @@ import { ModelRouter } from "../src/core/model-router.js";
 import { OllamaAdapter } from "../src/providers/ollama/ollama.adapter.js";
 
 test("Ollama adapter discovers models and their capabilities", async () => {
-  const fakeFetch: typeof fetch = async (input) => {
+  const fakeFetch: typeof fetch = async (input, init) => {
     const url = String(input);
     if (url.endsWith("/api/tags")) {
       return new Response(JSON.stringify({
@@ -17,7 +17,7 @@ test("Ollama adapter discovers models and their capabilities", async () => {
       }), { status: 200 });
     }
     if (url.endsWith("/api/show")) {
-      const body = JSON.parse(String((arguments as unknown as { 0: RequestInit }).0?.body ?? "{}")) as { model?: string };
+      const body = JSON.parse(String(init?.body ?? "{}")) as { model?: string };
       return new Response(JSON.stringify({
         capabilities: body.model?.startsWith("nomic") ? ["embedding"] : ["completion"],
       }), { status: 200 });
