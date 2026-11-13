@@ -22,29 +22,49 @@ export async function registerProviderRoutes(app: FastifyInstance, config: AppCo
   const router = new ModelRouter(providers);
 
   app.get("/api/v1/providers", async () => {
-    const health = await registry.getProviderHealth("ollama");
-    return {
-      providers: [{
-        id: "ollama",
-        name: "Ollama",
-        type: "local",
-        baseUrl: config.OLLAMA_BASE_URL,
+    const providers = await Promise.all(registry.listProviders().map(async (provider) => {
+      const health = await registry.getProviderHealth(provider.id);
+      return {
+        id: provider.id,
+        name: provider.name,
+        type: provider.id === "ollama" ? "local" : "cloud",
+        ...(provider.id === "ollama" ? { baseUrl: config.OLLAMA_BASE_URL } : {}),
         status: health.status,
         ...(health.version ? { version: health.version } : {}),
-      }],
-    };
+        ...(health.errorCode ? { errorCode: health.errorCode } : {}),
+      };
+    }));
+    return { providers };
   });
 
   app.get("/api/v1/models", async (_request, reply) => {
-    try {
-      const models = await registry.discoverModels("ollama");
-      return { provider: "ollama", models };
-    } catch (error) {
+    const results = await Promise.all(registry.listProviders().map(async (provider) => ({
+      providerId: provider.id,
+      result: await registry.discoverModels(provider.id),
+    })).map(async (task) => {
+      try {
+        return { status: "fulfilled" as const, value: await task };
+      } catch (reason) {
+        return { status: "rejected" as const, reason };
+      }
+    }));
+
+    const models = results.flatMap((result) => result.status === "fulfilled" ? result.value.result : []);
+    const failures = results.filter((result) => result.status === "rejected");
+    if (models.length === 0 && failures.length === results.length && results.length > 0) {
+      const error = failures[0]?.reason;
       const code = error instanceof ProviderRequestError ? error.code : "PROVIDER_UNAVAILABLE";
       return reply.code(code === "PROVIDER_TIMEOUT" ? 504 : 503).send({
-        error: { code, message: "مدل‌های Ollama در دسترس نیستند. وضعیت سرویس محلی را بررسی کنید." },
+        error: { code, message: "مدل‌های Providerهای متصل در دسترس نیستند. وضعیت اتصال‌ها را بررسی کنید." },
       });
     }
+
+    return {
+      models,
+      errors: failures.map((failure) => ({
+        code: failure.reason instanceof ProviderRequestError ? failure.reason.code : "PROVIDER_UNAVAILABLE",
+      })),
+    };
   });
 
   app.post("/api/v1/chat/completions", async (request, reply) => {
@@ -63,9 +83,15 @@ export async function registerProviderRoutes(app: FastifyInstance, config: AppCo
     try {
       const provider = router.getProvider(parsed.data.provider);
       const availableModels = await registry.discoverModels(provider.id, controller.signal);
-      if (!availableModels.some((model) => model.id === parsed.data.model)) {
+      const selectedModel = availableModels.find((model) => model.id === parsed.data.model);
+      if (!selectedModel) {
         return reply.code(404).send({
           error: { code: "MODEL_NOT_FOUND", message: "مدل انتخاب‌شده در Ollama نصب نیست یا در دسترس قرار ندارد." },
+        });
+      }
+      if (!selectedModel.chatSupported) {
+        return reply.code(400).send({
+          error: { code: "MODEL_CAPABILITY_MISMATCH", message: "مدل انتخاب‌شده برای گفتگو مناسب نیست." },
         });
       }
 
@@ -77,6 +103,9 @@ export async function registerProviderRoutes(app: FastifyInstance, config: AppCo
       });
 
       reply.hijack();
+      // SSE can remain idle while Ollama loads a model or generates its first token.
+      // Disable the socket inactivity timeout for this response only; provider and request timeouts remain enforced.
+      reply.raw.socket?.setTimeout(0);
       reply.raw.writeHead(200, {
         "content-type": "text/event-stream; charset=utf-8",
         "cache-control": "no-cache, no-transform",

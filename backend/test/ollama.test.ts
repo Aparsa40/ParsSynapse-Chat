@@ -5,39 +5,53 @@ import { ModelRegistry } from "../src/core/model-registry.js";
 import { ModelRouter } from "../src/core/model-router.js";
 import { OllamaAdapter } from "../src/providers/ollama/ollama.adapter.js";
 
-test("Ollama adapter discovers installed models from /api/tags", async () => {
-  const fakeFetch: typeof fetch = async (input) => {
-    assert.equal(String(input), "http://127.0.0.1:11434/api/tags");
-    return new Response(JSON.stringify({
-      models: [{ name: "llama3.2:1b", digest: "abc123", size: 1234, modified_at: "2026-11-13T10:00:00Z" }],
-    }), { status: 200, headers: { "content-type": "application/json" } });
+test("Ollama adapter discovers models and their capabilities", async () => {
+  const fakeFetch: typeof fetch = async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/api/tags")) {
+      return new Response(JSON.stringify({
+        models: [
+          { name: "llama3.2:1b", digest: "abc123", size: 1234, modified_at: "2026-11-13T10:00:00Z" },
+          { name: "nomic-embed-text:latest", digest: "embed123", size: 567, modified_at: "2026-11-13T10:00:00Z" },
+        ],
+      }), { status: 200 });
+    }
+    if (url.endsWith("/api/show")) {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { model?: string };
+      return new Response(JSON.stringify({
+        capabilities: body.model?.startsWith("nomic") ? ["embedding"] : ["completion"],
+      }), { status: 200 });
+    }
+    throw new Error(`Unexpected Ollama request: ${url}`);
   };
   const adapter = new OllamaAdapter("http://127.0.0.1:11434", 2_000, fakeFetch);
   const models = await adapter.listModels();
 
-  assert.equal(models.length, 1);
-  assert.deepEqual(models[0], {
-    id: "llama3.2:1b",
-    name: "llama3.2:1b",
-    providerId: "ollama",
-    digest: "abc123",
-    size: 1234,
-    modifiedAt: "2026-11-13T10:00:00Z",
-  });
+  assert.equal(models.length, 2);
+  assert.equal(models[0].id, "llama3.2:1b");
+  assert.equal(models[0].chatSupported, true);
+  assert.deepEqual(models[0].capabilities, ["completion"]);
+  assert.equal(models[1].id, "nomic-embed-text:latest");
+  assert.equal(models[1].chatSupported, false);
+  assert.deepEqual(models[1].capabilities, ["embedding"]);
 });
 
-test("Ollama adapter yields streamed chat content from NDJSON", async () => {
+test("Ollama adapter yields streamed chat content and keeps the model loaded", async () => {
   const fakeFetch: typeof fetch = async (input, init) => {
-    assert.equal(String(input), "http://127.0.0.1:11434/api/chat");
-    const body = JSON.parse(String(init?.body)) as { model: string; stream: boolean };
-    assert.equal(body.model, "llama3.2:1b");
-    assert.equal(body.stream, true);
-    return new Response([
-      JSON.stringify({ message: { role: "assistant", content: "سلام " }, done: false }),
-      JSON.stringify({ message: { role: "assistant", content: "دنیا" }, done: false }),
-      JSON.stringify({ message: { role: "assistant", content: "" }, done: true }),
-      "",
-    ].join("\n"), { status: 200 });
+    const url = String(input);
+    if (url.endsWith("/api/chat")) {
+      const body = JSON.parse(String(init?.body)) as { model: string; stream: boolean; keep_alive: number | string };
+      assert.equal(body.model, "llama3.2:1b");
+      assert.equal(body.stream, true);
+      assert.equal(body.keep_alive, -1);
+      return new Response([
+        JSON.stringify({ message: { role: "assistant", content: "سلام " }, done: false }),
+        JSON.stringify({ message: { role: "assistant", content: "دنیا" }, done: false }),
+        JSON.stringify({ message: { role: "assistant", content: "" }, done: true }),
+        "",
+      ].join("\n"), { status: 200 });
+    }
+    throw new Error(`Unexpected Ollama request: ${url}`);
   };
   const adapter = new OllamaAdapter("http://127.0.0.1:11434", 2_000, fakeFetch);
   const chunks: string[] = [];
@@ -47,10 +61,69 @@ test("Ollama adapter yields streamed chat content from NDJSON", async () => {
   })) chunks.push(chunk);
 
   assert.deepEqual(chunks, ["سلام ", "دنیا"]);
+
+  const secondTurn: string[] = [];
+  for await (const chunk of adapter.chatStream({
+    model: "llama3.2:1b",
+    messages: [{ role: "user", content: "دوباره سلام" }],
+  })) secondTurn.push(chunk);
+  assert.deepEqual(secondTurn, ["سلام ", "دنیا"]);
+});
+
+test("Ollama adapter serializes concurrent chat requests and unloads only when switching models", async () => {
+  let activeChats = 0;
+  let maximumActiveChats = 0;
+  let unloadCalls = 0;
+  const fakeFetch: typeof fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/api/generate")) {
+      unloadCalls += 1;
+      return new Response(JSON.stringify({}), { status: 200 });
+    }
+    if (url.endsWith("/api/ps")) {
+      return new Response(JSON.stringify({ models: [] }), { status: 200 });
+    }
+    if (url.endsWith("/api/chat")) {
+      activeChats += 1;
+      maximumActiveChats = Math.max(maximumActiveChats, activeChats);
+      const body = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+          controller.enqueue(new TextEncoder().encode(JSON.stringify({
+            message: { role: "assistant", content: "ok" },
+            done: true,
+          }) + "\n"));
+          controller.close();
+          activeChats -= 1;
+        },
+      });
+      return new Response(body, { status: 200 });
+    }
+    throw new Error(`Unexpected Ollama request: ${url}`);
+  };
+
+  const adapter = new OllamaAdapter("http://127.0.0.1:11434", 2_000, fakeFetch);
+  const run = async (model: string) => {
+    const chunks: string[] = [];
+    for await (const chunk of adapter.chatStream({
+      model,
+      messages: [{ role: "user", content: "test" }],
+    })) chunks.push(chunk);
+    return chunks;
+  };
+
+  const results = await Promise.all([run("model-a"), run("model-b")]);
+  assert.deepEqual(results, [["ok"], ["ok"]]);
+  assert.equal(maximumActiveChats, 1);
+  assert.equal(activeChats, 0);
+  assert.equal(unloadCalls, 1);
 });
 
 test("model registry and router resolve the Ollama adapter", async () => {
-  const fakeFetch: typeof fetch = async () => new Response(JSON.stringify({ models: [] }), { status: 200 });
+  const fakeFetch: typeof fetch = async (input) => {
+    if (String(input).endsWith("/api/tags")) return new Response(JSON.stringify({ models: [] }), { status: 200 });
+    throw new Error("Unexpected request");
+  };
   const adapter = new OllamaAdapter("http://127.0.0.1:11434", 2_000, fakeFetch);
   const registry = new ModelRegistry([adapter]);
   const router = new ModelRouter([adapter]);

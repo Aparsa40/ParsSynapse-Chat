@@ -82,7 +82,7 @@ Replace `YOUR_INSTALLED_MODEL` with an ID returned by `GET /api/v1/models`; the 
 - `WEB_ORIGIN`: allowed frontend origin.
 - `REQUEST_TIMEOUT_MS`: inbound HTTP request timeout.
 - `OLLAMA_BASE_URL`: Ollama HTTP loopback URL.
-- `OLLAMA_REQUEST_TIMEOUT_MS`: Ollama request timeout, including generation.
+- `OLLAMA_REQUEST_TIMEOUT_MS`: Ollama request timeout, including generation; defaults to 600000 ms for slower local hardware.
 
 The Ollama endpoint is restricted to loopback hosts to prevent arbitrary network access through provider configuration.
 
