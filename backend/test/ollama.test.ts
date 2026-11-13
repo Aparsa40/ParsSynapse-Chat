@@ -91,15 +91,16 @@ test("Ollama adapter serializes concurrent chat requests until unload is confirm
 
   const adapter = new OllamaAdapter("http://127.0.0.1:11434", 2_000, fakeFetch);
   const run = async (model: string) => {
-    for await (const _chunk of adapter.chatStream({
+    const chunks: string[] = [];
+    for await (const chunk of adapter.chatStream({
       model,
       messages: [{ role: "user", content: "test" }],
-    })) {
-      // Consume the stream to release the lifecycle lock.
-    }
+    })) chunks.push(chunk);
+    return chunks;
   };
 
-  await Promise.all([run("model-a"), run("model-b")]);
+  const results = await Promise.all([run("model-a"), run("model-b")]);
+  assert.deepEqual(results, [["ok"], ["ok"]]);
   assert.equal(maximumActiveChats, 1);
   assert.equal(activeChats, 0);
 });
