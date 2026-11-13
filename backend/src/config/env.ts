@@ -1,5 +1,17 @@
 import { z } from "zod";
 
+const localOllamaUrl = z.string().url().refine((value) => {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" &&
+      ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) &&
+      !url.username && !url.password &&
+      (url.pathname === "/" || url.pathname === "");
+  } catch {
+    return false;
+  }
+}, "must be an HTTP loopback URL without credentials or a path");
+
 const environmentSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   HOST: z.string().default("127.0.0.1"),
@@ -7,6 +19,8 @@ const environmentSchema = z.object({
   WEB_ORIGIN: z.string().url().default("http://127.0.0.1:5173"),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
   REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
+  OLLAMA_BASE_URL: localOllamaUrl.default("http://127.0.0.1:11434"),
+  OLLAMA_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(120_000),
 });
 
 export type AppConfig = z.infer<typeof environmentSchema>;
