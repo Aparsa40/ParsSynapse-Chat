@@ -36,8 +36,6 @@ jobs:
         run: npm ci
       - name: Build frontend (TypeScript + Vite)
         run: npm run build
-      - name: Audit frontend dependencies
-        run: npm audit --audit-level=high
 
   backend-checks:
     name: Backend Typecheck, Tests and Build
@@ -60,5 +58,26 @@ jobs:
         run: npm test
       - name: Build backend
         run: npm run build
+
+  dependency-audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Audit frontend dependencies
+        working-directory: frontend
+        run: npm audit --audit-level=high
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm install --no-audit --no-fund
       - name: Audit backend dependencies
+        working-directory: backend
         run: npm audit --audit-level=high
