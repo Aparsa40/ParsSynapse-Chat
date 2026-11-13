@@ -29,10 +29,6 @@ interface OllamaShowResponse {
   capabilities?: string[];
 }
 
-interface OllamaPsResponse {
-  models?: Array<{ name?: string; model?: string }>;
-}
-
 function requestSignal(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
   const timeout = AbortSignal.timeout(timeoutMs);
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
@@ -42,7 +38,6 @@ export class OllamaAdapter implements ProviderAdapter {
   readonly id = "ollama";
   readonly name = "Ollama";
   private chatQueue: Promise<void> = Promise.resolve();
-  private lifecycleBlocked = false;
 
   constructor(
     private readonly baseUrl: string,
@@ -118,19 +113,6 @@ export class OllamaAdapter implements ProviderAdapter {
     return models.filter((model): model is ModelDescriptor => model !== null);
   }
 
-  private async waitForModelUnload(model: string): Promise<void> {
-    const deadline = Date.now() + 20_000;
-    while (Date.now() < deadline) {
-      const response = await this.request("/api/ps");
-      if (!response.ok) throw new ProviderRequestError("Could not verify Ollama model unload.", "MODEL_UNLOAD_TIMEOUT");
-      const payload = await response.json() as OllamaPsResponse;
-      const stillLoaded = (payload.models ?? []).some((item) => (item.name ?? item.model) === model);
-      if (!stillLoaded) return;
-      await new Promise((resolve) => setTimeout(resolve, 150));
-    }
-    throw new ProviderRequestError("Ollama did not unload the previous model in time.", "MODEL_UNLOAD_TIMEOUT");
-  }
-
   async *chatStream(options: {
     model: string;
     messages: ChatMessage[];
@@ -141,11 +123,7 @@ export class OllamaAdapter implements ProviderAdapter {
     this.chatQueue = new Promise<void>((resolve) => { release = resolve; });
     await previous;
 
-    let lifecycleError: unknown;
     try {
-      if (this.lifecycleBlocked) {
-        throw new ProviderRequestError("Ollama model lifecycle is blocked because a previous model could not be unloaded. Restart the local backend after checking Ollama.", "MODEL_UNLOAD_TIMEOUT");
-      }
       if (options.signal?.aborted) throw options.signal.reason ?? new Error("Request aborted.");
 
       const response = await this.request("/api/chat", {
@@ -155,7 +133,8 @@ export class OllamaAdapter implements ProviderAdapter {
           model: options.model,
           messages: options.messages,
           stream: true,
-          keep_alive: 0,
+          // Keep the selected model resident; do not force an unload after each response.
+          keep_alive: -1,
         }),
       }, options.signal);
 
@@ -191,15 +170,9 @@ export class OllamaAdapter implements ProviderAdapter {
         reader.releaseLock();
       }
     } finally {
-      try {
-        await this.waitForModelUnload(options.model);
-      } catch (error) {
-        this.lifecycleBlocked = true;
-        lifecycleError = error;
-      } finally {
-        release();
-      }
+      // The queue lock protects local generation concurrency, not model residency.
+      // Ollama keeps the model loaded according to keep_alive above.
+      release();
     }
-    if (lifecycleError) throw lifecycleError;
   }
 }
