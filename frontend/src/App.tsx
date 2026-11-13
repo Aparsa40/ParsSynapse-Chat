@@ -203,7 +203,7 @@ export default function App() {
                 ...conversation,
                 messages: conversation.messages.map((item) =>
                   item.id === assistantMessage.id
-                    ? { ...item, content: item.content ? `${item.content}\\n\\n${message}` : message }
+                    ? { ...item, content: item.content ? `${item.content}\n\n${message}` : message }
                     : item,
                 ),
               }
