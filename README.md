@@ -4,7 +4,7 @@ A Persian-first, local-first AI chat workspace designed for hybrid local and clo
 
 ## Project status
 
-**Current milestone:** Phase 2 — Provider Architecture and Ollama integration.
+**Current milestone:** Phase 3 — Frontend and Backend integration.
 
 - React + Vite + TypeScript frontend.
 - Fastify 5 + TypeScript backend.
@@ -80,4 +80,4 @@ Ollama defaults to `http://127.0.0.1:11434`. Model IDs are discovered at runtime
 
 ## Important
 
-The current chat UI still uses demo responses. The backend Ollama APIs are available, but the frontend has not yet been connected to the real chat API.
+Cloud providers, conversation persistence, memory, RAG and MCP runtime remain future milestones.

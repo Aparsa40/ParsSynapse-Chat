@@ -10,6 +10,8 @@ export interface ModelDescriptor {
   digest: string;
   size: number;
   modifiedAt: string;
+  capabilities: string[];
+  chatSupported: boolean;
 }
 
 export interface ProviderHealth {

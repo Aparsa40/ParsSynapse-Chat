@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent } from "react";
-import { Check, ChevronDown, Cpu, Plus, Server, ShieldCheck, X } from "lucide-react";
+import { Check, ChevronDown, Cpu, Plus, RefreshCw, Server, ShieldCheck, X } from "lucide-react";
 import {
   modelProviderPresets,
   type McpServerProfile,
@@ -8,11 +8,11 @@ import {
   type McpTransport,
 } from "../types/providers";
 
-type Props = { onClose: () => void };
+type Props = { onClose: () => void; onRefreshModels: () => Promise<string> };
 
 
 
-export default function ModelManager({ onClose }: Props) {
+export default function ModelManager({ onClose, onRefreshModels }: Props) {
   const [activeTab, setActiveTab] = useState<"models" | "mcp">("models");
   const [connectionType, setConnectionType] = useState<ModelConnectionType>("api");
   const [providerId, setProviderId] = useState("openrouter");
@@ -24,6 +24,8 @@ export default function ModelManager({ onClose }: Props) {
   const [serverName, setServerName] = useState("");
   const [transport, setTransport] = useState<McpTransport>("stdio");
   const [commandOrUrl, setCommandOrUrl] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
 
   const availablePresets = useMemo(
     () => modelProviderPresets.filter((item) => item.connectionType === connectionType),
@@ -90,6 +92,18 @@ export default function ModelManager({ onClose }: Props) {
     );
   };
 
+  const refreshConnections = async () => {
+    setRefreshing(true);
+    setRefreshMessage(null);
+    try {
+      setRefreshMessage(await onRefreshModels());
+    } catch (error) {
+      setRefreshMessage(error instanceof Error ? error.message : "بازخوانی اتصال‌ها ناموفق بود.");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   return (
     <div className="manager-backdrop" role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
@@ -119,6 +133,14 @@ export default function ModelManager({ onClose }: Props) {
           <div className="manager-content">
             <div className="manager-section-title">
               <div><h3>اتصال مدل جدید</h3><p>روش اتصال را انتخاب و مشخصات سرویس را وارد کن.</p></div>
+            </div>
+            <div className="manager-refresh-panel">
+              <button className="manager-primary-button" type="button" onClick={() => void refreshConnections()} disabled={refreshing}>
+                <RefreshCw size={16} className={refreshing ? "spin" : ""} />
+                {refreshing ? "در حال بازخوانی اتصال‌ها..." : "بازخوانی Providerها و فهرست مدل‌ها"}
+              </button>
+              <p className="field-hint">وضعیت سرویس‌های متصل و فهرست مدل‌های Providerهای پیاده‌سازی‌شده در Backend برای نشست جاری دوباره دریافت می‌شود.</p>
+              {refreshMessage && <p className="field-hint" role="status">{refreshMessage}</p>}
             </div>
             <div className="connection-type-switch">
               <button className={connectionType === "api" ? "selected" : ""} onClick={() => chooseType("api")}>API Provider</button>
@@ -152,7 +174,7 @@ export default function ModelManager({ onClose }: Props) {
               <div className="manager-empty">
                 <Cpu size={22} />
                 <strong>هنوز پیکربندی مدلی ثبت نشده است</strong>
-                <span>مدل‌های نصب‌شده Ollama پس از پیاده‌سازی Backend به‌صورت پویا شناسایی می‌شوند.</span>
+                <span>مدل‌های واقعی از Backend خوانده می‌شوند؛ برای دریافت آخرین فهرست از دکمه بازخوانی استفاده کن.</span>
               </div>
             ) : (
               <div className="connection-list">
@@ -215,7 +237,7 @@ export default function ModelManager({ onClose }: Props) {
           </div>
         )}
         <footer className="manager-footer">
-          <span>این نسخه فقط پیکربندی‌ها را در حافظه رابط نگه می‌دارد؛ اتصال واقعی در مرحله Backend فعال می‌شود.</span>
+          <span>فهرست‌های زنده از Providerهای متصل در Backend دریافت می‌شوند. پیکربندی‌های فرم هنوز محلی و آزمایشی هستند.</span>
           <button onClick={onClose}>بستن</button>
         </footer>
       </section>
