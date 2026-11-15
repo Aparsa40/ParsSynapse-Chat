@@ -479,7 +479,7 @@ export default function App() {
                 </div>
                 <div className="composer-menu-wrap">
                   <button type="button" className="composer-mode active-model-trigger" title="انتخاب مدل و Adapter" aria-expanded={modelMenuOpen} onClick={() => { setModelMenuOpen((open) => !open); setConnectorsOpen(false); }}>
-                    <span className="adapter-status-dot" />
+                    <span className={`adapter-status-dot ${providerStatus === "connected" ? "connected" : "disconnected"}`} title={providerStatus === "connected" ? "اتصال Provider برقرار است" : "اتصال Provider در دسترس نیست"} />
                     <span>{selectedModel?.providerId === "ollama" ? "Ollama" : selectedModel?.providerId ?? "بدون Adapter"}</span>
                     <span className="composer-model-name">{selectedModel?.name ?? "مدلی انتخاب نشده"}</span>
                     <ChevronDown size={13} />
