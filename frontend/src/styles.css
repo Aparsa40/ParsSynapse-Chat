@@ -249,7 +249,14 @@ button:disabled { cursor: not-allowed; opacity: .42; }
 .composer-popover > button { display: flex; align-items: center; gap: 7px; width: 100%; padding: 9px 8px; color: #d8d4e2; border: 0; border-radius: 7px; background: transparent; cursor: pointer; text-align: right; font-size: 10px; }
 .composer-popover > button:hover { background: #ffffff0d; }
 .composer-popover > button small { margin-right: auto; color: #8d899b; font-size: 9px; }
-.composer-model-menu { width: 290px; }
+.composer-model-menu {
+  top: auto;
+  bottom: calc(100% + 8px);
+  width: min(290px, calc(100vw - 48px));
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .composer-model-menu > button svg:last-child { margin-right: auto; color: #bba9f5; }
 .composer textarea { font-size: var(--chat-font-size,13px); }
 .message-content { font-size: var(--chat-font-size,13px); }
