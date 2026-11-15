@@ -8,11 +8,15 @@ import {
   type McpTransport,
 } from "../types/providers";
 
-type Props = { onClose: () => void; onRefreshModels: () => Promise<string> };
+type Props = {
+  onClose: () => void;
+  onRefreshModels: () => Promise<string>;
+  onRefreshConnections: () => Promise<string>;
+};
 
 
 
-export default function ModelManager({ onClose, onRefreshModels }: Props) {
+export default function ModelManager({ onClose, onRefreshModels, onRefreshConnections }: Props) {
   const [activeTab, setActiveTab] = useState<"models" | "mcp">("models");
   const [connectionType, setConnectionType] = useState<ModelConnectionType>("api");
   const [providerId, setProviderId] = useState("openrouter");
@@ -26,6 +30,8 @@ export default function ModelManager({ onClose, onRefreshModels }: Props) {
   const [commandOrUrl, setCommandOrUrl] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
+  const [refreshingConnections, setRefreshingConnections] = useState(false);
+  const [connectionMessage, setConnectionMessage] = useState<string | null>(null);
 
   const availablePresets = useMemo(
     () => modelProviderPresets.filter((item) => item.connectionType === connectionType),
@@ -92,15 +98,27 @@ export default function ModelManager({ onClose, onRefreshModels }: Props) {
     );
   };
 
-  const refreshConnections = async () => {
+  const refreshModels = async () => {
     setRefreshing(true);
     setRefreshMessage(null);
     try {
       setRefreshMessage(await onRefreshModels());
     } catch (error) {
-      setRefreshMessage(error instanceof Error ? error.message : "بازخوانی اتصال‌ها ناموفق بود.");
+      setRefreshMessage(error instanceof Error ? error.message : "بازخوانی مدل‌ها ناموفق بود.");
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const refreshConnections = async () => {
+    setRefreshingConnections(true);
+    setConnectionMessage(null);
+    try {
+      setConnectionMessage(await onRefreshConnections());
+    } catch (error) {
+      setConnectionMessage(error instanceof Error ? error.message : "بازخوانی وضعیت اتصال‌ها ناموفق بود.");
+    } finally {
+      setRefreshingConnections(false);
     }
   };
 
@@ -132,15 +150,22 @@ export default function ModelManager({ onClose, onRefreshModels }: Props) {
         {activeTab === "models" ? (
           <div className="manager-content">
             <div className="manager-section-title">
-              <div><h3>اتصال مدل جدید</h3><p>روش اتصال را انتخاب و مشخصات سرویس را وارد کن.</p></div>
+              <div><h3>مدیریت مدل‌ها و Providerها</h3><p>مدل‌های قابل گفتگو را انتخاب کن و اتصال سرویس‌های محلی یا آنلاین را بررسی کن.</p></div>
             </div>
             <div className="manager-refresh-panel">
-              <button className="manager-primary-button" type="button" onClick={() => void refreshConnections()} disabled={refreshing}>
-                <RefreshCw size={16} className={refreshing ? "spin" : ""} />
-                {refreshing ? "در حال بازخوانی اتصال‌ها..." : "بازخوانی Providerها و فهرست مدل‌ها"}
-              </button>
-              <p className="field-hint">وضعیت سرویس‌های متصل و فهرست مدل‌های Providerهای پیاده‌سازی‌شده در Backend برای نشست جاری دوباره دریافت می‌شود.</p>
+              <div className="manager-refresh-actions">
+                <button className="manager-primary-button" type="button" onClick={() => void refreshModels()} disabled={refreshing}>
+                  <RefreshCw size={15} className={refreshing ? "spin" : ""} />
+                  {refreshing ? "در حال دریافت مدل‌ها..." : "بازخوانی فهرست مدل‌ها"}
+                </button>
+                <button className="manager-secondary-button" type="button" onClick={() => void refreshConnections()} disabled={refreshingConnections}>
+                  <Server size={15} className={refreshingConnections ? "spin" : ""} />
+                  {refreshingConnections ? "در حال بررسی..." : "بازخوانی اتصال‌ها"}
+                </button>
+              </div>
+              <p className="field-hint">این دو عملیات مستقل‌اند: اولی مدل‌های قابل استفاده را می‌خواند و دومی وضعیت Providerها و اتصال سرویس‌ها را بررسی می‌کند.</p>
               {refreshMessage && <p className="field-hint" role="status">{refreshMessage}</p>}
+              {connectionMessage && <p className="field-hint" role="status">{connectionMessage}</p>}
             </div>
             <div className="connection-type-switch">
               <button className={connectionType === "api" ? "selected" : ""} onClick={() => chooseType("api")}>API Provider</button>
