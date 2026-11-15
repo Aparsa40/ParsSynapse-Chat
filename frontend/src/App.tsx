@@ -17,6 +17,13 @@ import {
   Sparkles,
   SquarePen,
   Square,
+  UserRound,
+  Palette,
+  PlugZap,
+  SlidersHorizontal,
+  Server,
+  Wrench,
+  RefreshCw,
 } from "lucide-react";
 
 type Message = {
@@ -88,6 +95,11 @@ export default function App() {
   const controllersRef = useRef<Map<string, AbortController>>(new Map());
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [modelManagerOpen, setModelManagerOpen] = useState(false);
+  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
+  const [settingsView, setSettingsView] = useState<"menu" | "profile" | "appearance" | "themes">("menu");
+  const [connectorsOpen, setConnectorsOpen] = useState(false);
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [fontSize, setFontSize] = useState(13);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -99,53 +111,46 @@ export default function App() {
   const isThinking = Boolean(sendingByConversation[activeId]);
 
   const refreshModels = async (signal?: AbortSignal): Promise<string> => {
-    const [providerResult, modelResult] = await Promise.allSettled([
-      getProviders(signal),
-      getModels(signal),
-    ]);
-
-    if (signal?.aborted) return "بازخوانی لغو شد.";
-
-    if (providerResult.status === "fulfilled") {
-      setProviderStatus(
-        providerResult.value.some((provider) => provider.id === "ollama" && provider.status === "connected")
-          ? "connected"
-          : "unavailable",
-      );
-    } else {
-      setProviderStatus("unavailable");
-    }
-
-    if (modelResult.status === "fulfilled") {
-      const discoveredModels = modelResult.value;
+    try {
+      const discoveredModels = await getModels(signal);
+      if (signal?.aborted) return "بازخوانی لغو شد.";
       setModels(discoveredModels);
       setSelectedModelId((current) =>
         discoveredModels.some((model) => model.id === current && model.chatSupported)
           ? current
           : discoveredModels.find((model) => model.chatSupported)?.id ?? "",
       );
-    } else {
-      setModels([]);
-      setSelectedModelId("");
-    }
-
-    const errors = [
-      providerResult.status === "rejected" ? providerResult.reason : null,
-      modelResult.status === "rejected" ? modelResult.reason : null,
-    ].filter(Boolean);
-    if (errors.length > 0) {
-      const message = errors[0] instanceof Error ? errors[0].message : "بازخوانی اتصال‌ها کامل نشد.";
+      setBackendError(null);
+      return `فهرست مدل‌ها به‌روزرسانی شد؛ ${discoveredModels.length} مدل دریافت شد.`;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "بازخوانی مدل‌ها ناموفق بود.";
       setBackendError(message);
       return message;
     }
+  };
 
-    setBackendError(null);
-    return `بازخوانی انجام شد؛ ${modelResult.status === "fulfilled" ? modelResult.value.length : 0} مدل از Providerهای فعلی دریافت شد.`;
+  const refreshConnections = async (signal?: AbortSignal): Promise<string> => {
+    try {
+      const providers = await getProviders(signal);
+      if (signal?.aborted) return "بازخوانی لغو شد.";
+      setProviderStatus(
+        providers.some((provider) => provider.id === "ollama" && provider.status === "connected")
+          ? "connected"
+          : "unavailable",
+      );
+      setBackendError(null);
+      return `وضعیت اتصال‌ها به‌روزرسانی شد؛ ${providers.length} Provider شناسایی شد.`;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "بازخوانی اتصال‌ها ناموفق بود.";
+      setProviderStatus("unavailable");
+      setBackendError(message);
+      return message;
+    }
   };
 
   useEffect(() => {
     const controller = new AbortController();
-    void refreshModels(controller.signal);
+    void Promise.all([refreshModels(controller.signal), refreshConnections(controller.signal)]);
     return () => controller.abort();
   }, []);
 
@@ -267,7 +272,7 @@ export default function App() {
   };
 
   return (
-    <div className="app-shell" dir="rtl">
+    <div className={`app-shell ${theme === "light" ? "theme-light" : ""}`} dir="rtl" style={{ "--chat-font-size": `${fontSize}px` } as React.CSSProperties}>
       {sidebarOpen && <button className="mobile-backdrop" aria-label="بستن منو" onClick={() => setSidebarOpen(false)} />}
 
       <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
@@ -276,10 +281,55 @@ export default function App() {
             <span className="brand-mark"><Sparkles size={19} /></span>
             <span className="brand-name">ParsSynapse</span>
           </button>
-          <button className="icon-button sidebar-collapse" title="بستن منو" onClick={() => setSidebarOpen(false)}>
-            <PanelRightClose size={18} />
-          </button>
+          <div className="sidebar-top-actions">
+            <button className="icon-button sidebar-settings-trigger" title="تنظیمات" aria-label="تنظیمات" aria-expanded={settingsMenuOpen} onClick={() => { setSettingsMenuOpen((open) => !open); setSettingsView("menu"); }}>
+              <Settings2 size={18} />
+            </button>
+            <button className="icon-button sidebar-collapse" title="بستن منو" onClick={() => setSidebarOpen(false)}>
+              <PanelRightClose size={18} />
+            </button>
+          </div>
         </div>
+
+        {settingsMenuOpen && (
+          <div className="settings-popover" role="dialog" aria-label="تنظیمات فضای کاری">
+            {settingsView === "menu" ? (
+              <>
+                <div className="settings-popover-heading">فضای شخصی</div>
+                <button onClick={() => setSettingsView("profile")}><UserRound size={16} /><span>Profile</span></button>
+                <button onClick={() => setSettingsView("appearance")}><SlidersHorizontal size={16} /><span>Appearance</span></button>
+                <button onClick={() => setSettingsView("themes")}><Palette size={16} /><span>Themes</span></button>
+                <button onClick={() => { setModelManagerOpen(true); setSettingsMenuOpen(false); }}><PlugZap size={16} /><span>Connections</span></button>
+              </>
+            ) : (
+              <>
+                <div className="settings-popover-subhead">
+                  <button className="settings-back" onClick={() => setSettingsView("menu")}>‹ بازگشت</button>
+                  <strong>{settingsView === "profile" ? "Profile" : settingsView === "appearance" ? "Appearance" : "Themes"}</strong>
+                </div>
+                {settingsView === "profile" && (
+                  <div className="settings-profile">
+                    <div className="avatar">P</div>
+                    <div><strong>فضای کاری شخصی</strong><small>حساب محلی · نسخه آزمایشی</small></div>
+                  </div>
+                )}
+                {settingsView === "appearance" && (
+                  <div className="settings-controls">
+                    <label>اندازه فونت گفتگو <strong>{fontSize}px</strong></label>
+                    <input type="range" min="12" max="18" value={fontSize} onChange={(event) => setFontSize(Number(event.target.value))} />
+                    <small>تغییر اندازه متن پیام‌های گفتگو</small>
+                  </div>
+                )}
+                {settingsView === "themes" && (
+                  <div className="settings-theme-options">
+                    <button className={theme === "dark" ? "selected" : ""} onClick={() => setTheme("dark")}><span className="theme-swatch theme-swatch-dark" />تیره {theme === "dark" && <Check size={14} />}</button>
+                    <button className={theme === "light" ? "selected" : ""} onClick={() => setTheme("light")}><span className="theme-swatch theme-swatch-light" />روشن {theme === "light" && <Check size={14} />}</button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
 
         <button className="new-chat-button" onClick={startNewChat}>
           <SquarePen size={17} />
@@ -313,19 +363,19 @@ export default function App() {
 
         <div className="sidebar-spacer" />
         <div className="sidebar-footer">
-          <div className="profile-card">
+          <button className="profile-card profile-card-button" onClick={() => { setSettingsMenuOpen(true); setSettingsView("profile"); }}>
             <div className="avatar">P</div>
             <div className="profile-copy">
               <strong>فضای کاری شخصی</strong>
-              <span>نسخه آزمایشی</span>
+              <span>حساب محلی · نسخه آزمایشی</span>
             </div>
-            <button className="icon-button profile-menu" aria-label="تنظیمات حساب"><Settings2 size={17} /></button>
-          </div>
+            <MoreHorizontal size={17} className="profile-menu" />
+          </button>
           <div className="sidebar-version">ParsSynapse Chat <span>0.1.0</span></div>
         </div>
       </aside>
 
-      {modelManagerOpen && <ModelManager onClose={() => setModelManagerOpen(false)} onRefreshModels={() => refreshModels()} />}
+      {modelManagerOpen && <ModelManager onClose={() => setModelManagerOpen(false)} onRefreshModels={() => refreshModels()} onRefreshConnections={() => refreshConnections()} />}
 
       <main className="main-panel">
         <header className="topbar">
@@ -333,28 +383,7 @@ export default function App() {
             <button className="icon-button mobile-menu" aria-label="باز کردن منو" onClick={() => setSidebarOpen(true)}>
               <Menu size={19} />
             </button>
-            <button className="icon-button model-settings-button" title="مدیریت اتصال‌ها" aria-label="مدیریت اتصال‌ها" onClick={() => setModelManagerOpen(true)}><Settings2 size={17} /></button>
-            <div className="model-picker-wrap">
-              <button className="model-picker" onClick={() => setModelMenuOpen((open) => !open)}>
-                <span>{selectedModel?.name ?? "مدل گفتگو موجود نیست"}</span>
-                <ChevronDown size={15} />
-              </button>
-              {modelMenuOpen && (
-                <div className="model-menu">
-                  <p>مدل‌های قابل استفاده برای گفتگو</p>
-                  {chatModels.length === 0 ? (
-                    <small>مدل گفتگو شناسایی نشد. مدل‌های نصب‌شده و قابلیت‌های آن‌ها را بررسی کن.</small>
-                  ) : chatModels.map((model) => (
-                    <button key={model.id} onClick={() => { setSelectedModelId(model.id); setModelMenuOpen(false); }}>
-                      <span>{model.name}</span>
-                      {selectedModelId === model.id && <Check size={15} />}
-                    </button>
-                  ))}
-                  <button type="button" onClick={() => void refreshModels()}><span>بازخوانی فهرست مدل‌ها</span></button>
-                </div>
-              )}
-            </div>
-            <span className={`environment-pill ${providerStatus === "connected" ? "provider-connected" : ""}`}><span /> {providerStatus === "checking" ? "در حال بررسی" : providerStatus === "connected" ? "Ollama متصل" : "Ollama قطع است"}</span>
+            <div className="chat-context-title">{activeConversation?.title ?? "گفت‌وگوی جدید"}</div>
           </div>
           <div className="topbar-end">
             <button className="share-button" onClick={() => void navigator.clipboard?.writeText(window.location.href)}>
@@ -435,14 +464,39 @@ export default function App() {
             />
             <div className="composer-toolbar">
               <div className="composer-tools">
-                <button type="button" className="composer-tool" title="افزودن فایل (به‌زودی)" disabled>
-                  <Plus size={18} />
-                </button>
-                <button type="button" className="composer-mode" title="حالت پاسخ‌دهی">
-                  <Sparkles size={14} />
-                  <span>پاسخ هوشمند</span>
-                  <ChevronDown size={13} />
-                </button>
+                <div className="composer-menu-wrap">
+                  <button type="button" className="composer-tool" title="Connectorها و ابزارها" aria-label="Connectorها و ابزارها" aria-expanded={connectorsOpen} onClick={() => { setConnectorsOpen((open) => !open); setModelMenuOpen(false); }}>
+                    <Plus size={18} />
+                  </button>
+                  {connectorsOpen && (
+                    <div className="composer-popover connector-popover">
+                      <strong>ابزارها و Connectorها</strong>
+                      <div><PlugZap size={15} /><span>GitHub</span><small>در انتظار اتصال Backend</small></div>
+                      <div><Wrench size={15} /><span>Local Workspace</span><small>MCP · در انتظار اتصال</small></div>
+                      <div><Server size={15} /><span>MCP Tools</span><small>مدیریت از Connections</small></div>
+                    </div>
+                  )}
+                </div>
+                <div className="composer-menu-wrap">
+                  <button type="button" className="composer-mode active-model-trigger" title="انتخاب مدل و Adapter" aria-expanded={modelMenuOpen} onClick={() => { setModelMenuOpen((open) => !open); setConnectorsOpen(false); }}>
+                    <span className={`adapter-status-dot ${providerStatus === "connected" ? "connected" : "disconnected"}`} title={providerStatus === "connected" ? "اتصال Provider برقرار است" : "اتصال Provider در دسترس نیست"} />
+                    <span>{selectedModel?.providerId === "ollama" ? "Ollama" : selectedModel?.providerId ?? "بدون Adapter"}</span>
+                    <span className="composer-model-name">{selectedModel?.name ?? "مدلی انتخاب نشده"}</span>
+                    <ChevronDown size={13} />
+                  </button>
+                  {modelMenuOpen && (
+                    <div className="composer-popover model-menu composer-model-menu">
+                      <strong>انتخاب مدل گفتگو</strong>
+                      {chatModels.length === 0 ? <small>مدل سازگار با گفتگو در دسترس نیست.</small> : chatModels.map((model) => (
+                        <button key={model.id} onClick={() => { setSelectedModelId(model.id); setModelMenuOpen(false); }}>
+                          <span>{model.name}</span><small>{model.providerId}</small>
+                          {selectedModelId === model.id && <Check size={14} />}
+                        </button>
+                      ))}
+                      <button type="button" onClick={() => void refreshModels()}><RefreshCw size={13} /><span>بازخوانی فهرست مدل‌ها</span></button>
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="composer-actions">
                 <button type="button" className="icon-button voice-button" title="ورودی صوتی (به‌زودی)" disabled>
