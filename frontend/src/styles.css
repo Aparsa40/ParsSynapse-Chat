@@ -277,3 +277,6 @@ button:disabled { cursor: not-allowed; opacity: .42; }
 .spin { animation: manager-spin 1s linear infinite; }
 @keyframes manager-spin { to { transform: rotate(360deg); } }
 .theme-light .manager-secondary-button { color: #494355; border-color: #d9d5e2; background: #ffffff; }
+
+.adapter-status-dot.connected { background: #63d69a; box-shadow: 0 0 8px #63d69a88; }
+.adapter-status-dot.disconnected { background: #d69a63; box-shadow: 0 0 8px #d69a6388; }
